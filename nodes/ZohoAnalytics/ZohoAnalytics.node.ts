@@ -137,7 +137,6 @@ export class ZohoAnalytics implements INodeType {
 				displayOptions: {
 					show: {
 						operation: ['deleteData', 'updateData','exportData'],
-						modifyAllRows:[false],
 					},
 				},
 				default: '',
@@ -364,8 +363,8 @@ methods = {
 					const endpoint = `/restapi/v2/workspaces/${workspaceID}/views/${viewID}/data`;
 					const headers={'ZANALYTICS-ORGID':orgID};
 					const criteria = this.getNodeParameter('criteria', itemIndex, "") as string;
-					const qs = {CONFIG :JSON.stringify({"responseFormat": "json","criteria": criteria})};
-					const data = await zohoApiRequest.call(this,'POST', endpoint, headers,{},qs);
+					const qs = {CONFIG :JSON.stringify({"responseFormat": "json", "criteria": criteria})};
+					const data = await zohoApiRequest.call(this,'GET', endpoint, headers,{},qs);
 					returnItems.push(...this.helpers.returnJsonArray(data.data));
 				}
 
