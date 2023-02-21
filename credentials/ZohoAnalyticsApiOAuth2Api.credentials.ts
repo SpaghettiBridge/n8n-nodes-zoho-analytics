@@ -40,7 +40,7 @@ export class ZohoAnalyticsApiOAuth2Api implements ICredentialType {
 			displayName: 'Auth URI Query Parameters',
 			name: 'authQueryParameters',
 			type: 'hidden',
-			default: '',
+			default: 'access_type=offline',
 		},
 		{
 			displayName: 'Authentication',
