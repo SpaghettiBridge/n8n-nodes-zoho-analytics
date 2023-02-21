@@ -1,12 +1,12 @@
 {
   "name": "n8n-nodes-zoho-analytics",
   "version": "0.1.0",
-  "description": "",
+  "description": "Zoho Analytics Node",
   "keywords": [
     "n8n-community-node-package"
   ],
   "license": "MIT",
-  "homepage": "",
+  "homepage": "https://github.com/SpaghettiBridge/n8n-nodes-zoho-analytics",
   "author": {
     "name": "Chris Bates",
     "email": "chris.bates@quay-tech.co.uk"
@@ -30,7 +30,7 @@
   "n8n": {
     "n8nNodesApiVersion": 1,
     "credentials": [
-      "dist/credentials/ZohoAnalyticsApi.credentials.js"
+      "dist/credentials/ZohoAnalyticsApiOAuth2Api.credentials.js"
 
     ],
     "nodes": [

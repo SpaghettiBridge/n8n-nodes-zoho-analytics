@@ -8,13 +8,19 @@ import {
 
 import {
 	IDataObject,
+	IExecuteSingleFunctions,
+	IHookFunctions,
 	ILoadOptionsFunctions,
 	INodeExecutionData,
+	IOAuth2Options,
 	NodeApiError,
 	NodeOperationError,
 } from 'n8n-workflow';
 
 import {
+	LoadedOrganisationOptions,
+	LoadedViewOptions,
+	LoadedWorkspaceOptions,
 	zohoApiCredentials,
 } from './types';
 import { listenerCount } from 'process';
@@ -22,117 +28,68 @@ import { listenerCount } from 'process';
 //create any functions in here that will be useful within your node
 
 //Generic API Request
-export async function zohoApiRequest(
-	this: IExecuteFunctions | ILoadOptionsFunctions,
-	method: string,
-	endpoint: string,
-	body: IDataObject = {},
-	qs: IDataObject = {},
-) {
-	const credentials = await this.getCredentials('zohoApi') as zohoApiCredentials;
-	const options: OptionsWithUri = {
-		headers: {
-			Authorization: `Bearer ${credentials.oauthToken}`,
-			'zoho-version': 4,
-		},
-		method,
-		body,
-		qs,
-		uri: `${credentials.domain}/${endpoint}`,
-		json: true,
-		gzip: true,
-		rejectUnauthorized: true,
-	};
-	if (Object.keys(qs).length === 0) {
-		delete options.qs;
-	}
 
-	if (Object.keys(body).length === 0) {
-		delete options.body;
-	}
-	try {
-		return await this.helpers.request!(options);
-	} catch (error) {
-		throw new NodeApiError(this.getNode(), error);
-	}
-}
 
 //function to load the file and make an api request with that file ( binary data not necessarily JSON)
-export async function zohoFileUploadRequest(
-	this: IExecuteFunctions | ILoadOptionsFunctions,
+export async function zohoApiRequest(
+	this: IExecuteFunctions | IExecuteSingleFunctions | ILoadOptionsFunctions | IHookFunctions,
 	method: string,
 	endpoint: string,
+	headers: IDataObject = {},
 	body: IDataObject = {},
 	qs: IDataObject = {},
-) {
-	const credentials = await this.getCredentials('zohoApi') as zohoApiCredentials;
+	option: IDataObject = {},
+	nextPageUrl = '',
+	isFormData = false,
+	// tslint:disable-next-line:no-any
+): Promise<any> {
+	const credentials = await this.getCredentials('zohoAnalyticsApiOAuth2Api');
 	const options: OptionsWithUri = {
 		headers: {
-			'authorization': `bearer ${credentials.oauthToken}`, //credentials.apiToken is being pulled from the zoho.credentials.ts
-			'Content-Type': 'multipart/form-data',
-			'zoho-version': 4,
+			'Content-Type': 'application/json',
+			...headers,
 		},
 		method,
 		body,
 		qs,
-		uri: `${credentials.domain}/${endpoint}`,
+		uri: `${credentials.apiUrl}${endpoint}`,
 		json: true,
-		gzip: true,
-		rejectUnauthorized: true,
-	};
-
-	if (Object.keys(qs).length === 0) {
-		delete options.qs;
-	}
-
-	if (Object.keys(body).length === 0) {
-		delete options.body;
-	}
-
-	try {
-		return await this.helpers.request!(options);
-	} catch (error) {
-		throw new NodeApiError(this.getNode(), error);
-	}
-}
-
-export async function zohoFileDownloadRequest(
-	this: IExecuteFunctions | ILoadOptionsFunctions,
-	method: string,
-	endpoint: string,
-	body: IDataObject = {},
-	qs: IDataObject = {},
-) {
-	const credentials = await this.getCredentials('zohoApi') as zohoApiCredentials;
-	const options: OptionsWithUri = {
-		headers: {
-			'authorization': `bearer ${credentials.oauthToken}`, //credentials.apiToken is being pulled from the zoho.credentials.ts
-			'accept': `*/*`,
-			'zoho-version': 4,
-		},
-		method,
-		body,
-		qs,
-		uri: `${credentials.domain}/${endpoint}`,
-		json: false,
-		gzip: true,
-		rejectUnauthorized: true,
-		encoding: null,
 		//@ts-ignore
-		resolveWithFullResponse: true,
+		resolveWithFullResponse: false,
 	};
-
-	if (Object.keys(qs).length === 0) {
-		delete options.qs;
+	if(nextPageUrl!==''){
+		options.uri = nextPageUrl;
 	}
 
-	if (Object.keys(body).length === 0) {
-		delete options.body;
+	if(isFormData){
+		//@ts-ignore
+		options.headers['Content-Type'] = 'multipart/form-data';
 	}
+// console.log(options.qs);
 
 	try {
-		return await this.helpers.request!(options);
+		if (Object.keys(body).length === 0) {
+			delete options.body;
+		}
+
+		const oAuth2Options: IOAuth2Options = {
+			includeCredentialsOnRefreshOnBody: true,
+		};
+
+		//@ts-ignore
+		const response = await this.helpers.requestOAuth2.call(this, 'zohoAnalyticsApiOAuth2Api', options, oAuth2Options);
+		//@ts-ignore
+		return response;
 	} catch (error) {
 		throw new NodeApiError(this.getNode(), error);
 	}
 }
+
+export const toWorkspaceOptions = (items: LoadedWorkspaceOptions[]) =>
+	items.map(({ workspaceId, workspaceName }) => ({ name:workspaceName, value:workspaceId }));
+
+	export const toviewOptions = (items: LoadedViewOptions[]) =>
+	items.map(({ viewId, viewName }) => ({ name:viewName, value:viewId }));
+
+		export const toOrganisationOptions = (items: LoadedOrganisationOptions[]) =>
+	items.map(({ orgId, orgName }) => ({ name:orgName, value:orgId }));

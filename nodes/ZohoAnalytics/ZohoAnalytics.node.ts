@@ -1,14 +1,18 @@
+import { json } from 'express';
 import { IExecuteFunctions } from 'n8n-core';
 import {
 	IBinaryData,
 	IDataObject,
+	ILoadOptionsFunctions,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	JsonValue,
 	NodeOperationError,
 } from 'n8n-workflow';
 
-import { zohoApiRequest, zohoFileDownloadRequest, zohoFileUploadRequest } from './GenericFunctions';
+import { toOrganisationOptions, toviewOptions, toWorkspaceOptions, zohoApiRequest } from './GenericFunctions';
+import { availableColumn } from './types';
 
 export class ZohoAnalytics implements INodeType {
 	description: INodeTypeDescription = {
@@ -23,6 +27,12 @@ export class ZohoAnalytics implements INodeType {
 		},
 		inputs: ['main'],
 		outputs: ['main'],
+		credentials: [
+			{
+				name: 'zohoAnalyticsApiOAuth2Api',
+				required: true,
+			},
+		],
 		properties: [
 			{
 				displayName: 'Operation',
@@ -51,8 +61,14 @@ export class ZohoAnalytics implements INodeType {
 					{
 						name: 'Import Data',
 						value: 'importData',
-						description: 'Add new data to table',
-						action: 'Add ne data to table',
+						description: 'Add new data to existing table',
+						action: 'Add new data to existing table',
+					},
+					{
+						name: 'Import New Table',
+						value: 'importNewTable',
+						description: 'Add new table',
+						action: 'Add new table',
 					},
 					{
 						name: 'Update Data',
@@ -63,71 +79,74 @@ export class ZohoAnalytics implements INodeType {
 				],
 				default: 'addRow',
 			},
+
 			{
-				displayName: 'ID',
-				name: 'id',
-				type: 'string',
-				description: 'ID of resource to Get, Edit, Delete or add data to',
-				default: '',
-				displayOptions: {
-					hide: {
-						operation: ['addTemplate'],
-					},
-				},
-			},
-			{
-				displayName: 'Body Type',
-				name: 'bodyType',
+				displayName: 'Organisation Name or ID',
+				name: 'organisation',
 				type: 'options',
-				options: [
-					{
-						name: 'Json',
-						value: 'json',
-					},
-					{
-						name: 'Per Field',
-						value: 'perField',
-					},
-				],
-				displayOptions: {
-					show: {
-						operation: ['renderReport'],
-					},
-				},
-				default: 'json',
-				description: 'Data for template to render the report',
-			},
-			{
-				displayName: 'Body',
-				name: 'body',
-				type: 'string',
-				description: 'JSON Body containing report data',
-				default: '',
-				displayOptions: {
-					show: {
-						operation: ['renderReport'],
-						bodyType: ['json'],
-					},
-				},
 				typeOptions: {
-					rows: 10,
+					loadOptionsMethod: 'getOrganisations',
 				},
+				default: '',
+				description: 'Organisations to get data from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code-examples/expressions/">expression</a>.',
 			},
+
 			{
-				displayName: 'Binary Property',
-				name: 'binaryPropertyName',
+				displayName: 'Workspace Name or ID',
+				name: 'workspace',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getWorkspaces',
+				},
+				default: '',
+				description: 'Workspace to get data from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code-examples/expressions/">expression</a>.',
+			},
+
+			{
+				displayName: 'Views Name or ID',
+				name: 'view',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getViews',
+					loadOptionsDependsOn:['workspace','organisation'],
+				},
+				default: '',
+				description: 'Views to get data from. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code-examples/expressions/">expression</a>.',
+			},
+
+
+
+			{
+				displayName: 'Modify All Rows',
+				name: 'modifyAllRows',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						operation: ['updateData', 'deleteData'],
+					},
+				},
+				default: false,
+				description:
+					'Whether or not to modify all rows in table',
+			},
+
+			{
+				displayName: 'Criteria',
+				name: 'criteria',
 				type: 'string',
 				displayOptions: {
 					show: {
-						operation: ['addTemplate', 'getTemplate', 'downloadReport'],
+						operation: ['deleteData', 'updateData','exportData'],
+						modifyAllRows:[false],
 					},
 				},
-				default: 'data',
+				default: '',
 				description:
-					'Name of the binary property which contains the data for the file to be uploaded. For Form-Data Multipart, they can be provided in the format: <code>"sendKey1:binaryProperty1,sendKey2:binaryProperty2</code>',
+					`Criteria for modifying select rows eg:(( "Region"='East' and "Sales"<1000) or ("Sales"."Region"='West' and "Sales"<2000))`,
 			},
+
 			{
-				displayName: 'Field Data',
+				displayName: 'Column Data',
 				name: 'data',
 				placeholder: 'Add field data',
 				type: 'fixedCollection',
@@ -138,222 +157,246 @@ export class ZohoAnalytics implements INodeType {
 				default: {},
 				displayOptions: {
 					show: {
-						operation: ['renderReport'],
-						bodyType: ['perField'],
+						operation: [
+							'addRow', 'updateData',
+						],
 					},
 				},
 				options: [
 					{
-						name: 'field',
-						displayName: 'Field',
+						name: 'columns',
+						displayName: 'Columns',
 						values: [
 							{
-								displayName: 'Field Name',
-								name: 'fieldName',
-								type: 'string',
+								displayName: 'Column Name or ID',
+								name: 'columnName',
+								type: 'options',
 								default: '',
-								description: 'Field name to include in item',
+								description: 'Column name to include in item. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code-examples/expressions/">expression</a>.',
+								typeOptions: {
+									loadOptionsMethod: 'getColumns',
+								},
 							},
 							{
-								displayName: 'Field Type',
-								name: 'fieldType',
+								displayName: 'Data Type',
+								name: 'dataType',
 								type: 'options',
 								default: 'string',
-								description: 'Value for the field',
+								description: 'Type of data in column',
 								options: [
 									{
 										name: 'String',
 										value: 'string',
 									},
-									{
-										name: 'Array',
-										value: 'array',
-									},
 								],
 							},
 							{
-								displayName: 'Field Value',
-								name: 'fieldValue',
+								displayName: 'Column Value',
+								name: 'columnValue',
 								type: 'string',
 								default: '',
-								description: 'Value for the field',
+								description: 'Value for the Column',
 							},
+
 						],
 					},
 				],
 			},
+
+			{
+				displayName: 'Import Type',
+				name: 'importType',
+				displayOptions: {
+					show: {
+						operation: ['importData'],
+					},
+				},
+				type: 'options',
+				default: 'append',
+				description: 'Type of import to perform',
+				options: [
+					{
+						name: 'Append',
+						value: 'append',
+					},
+					{
+						name: 'Truncate Add',
+						value: 'truncateadd ',
+					},
+					{
+						name: 'Update Add',
+						value: 'updateadd',
+					},
+				],
+			},
+				{
+				displayName: 'Table Name',
+				name: 'tableName',
+				type: 'string',
+				displayOptions: {
+					show: {
+						operation: ['importNewTable'],
+
+					},
+				},
+				default: '',
+				description:
+					`Name Of the New Table you wish to create`,
+			},
+			{
+				displayName: 'JSON Data',
+				name: 'jsonData',
+				type: 'string',
+				displayOptions: {
+					show: {
+						operation: ['importData','importNewTable'],
+
+					},
+				},
+				default: '',
+				description:
+					`JSON data to import into Table`,
+			},
 		],
 	};
+
+methods = {
+		loadOptions: {
+			async getOrganisations (this: ILoadOptionsFunctions) {
+				const data = await zohoApiRequest.call(this,'GET', `/restapi/v2/orgs`);
+				// console.log(data.data.ownedWorkspaces);
+				return toOrganisationOptions(data.data.orgs);
+			},
+			async getWorkspaces(this: ILoadOptionsFunctions) {
+				const data = await zohoApiRequest.call(this,'GET', `/restapi/v2/workspaces`);
+				// console.log(data.data.ownedWorkspaces);
+				return toWorkspaceOptions(data.data.ownedWorkspaces.concat(data.data.sharedWorkspaces));
+			},
+		async getViews (this: ILoadOptionsFunctions) {
+			const organisationID = this.getNodeParameter('organisation', '') as string;
+			const headers={'ZANALYTICS-ORGID':organisationID};
+			const workspaceID = this.getNodeParameter('workspace', '') as string;
+				const data = await zohoApiRequest.call(this,'GET', `/restapi/v2/workspaces/${workspaceID}/views`,headers);
+				// console.log(data.data.ownedWorkspaces);
+				return toviewOptions(data.data.views.filter((x: { viewType: string; })=> x.viewType ==="Table"));
+			},
+				async getColumns (this: ILoadOptionsFunctions) {
+			// const OrganisationID = this.getNodeParameter('organisation', '') as string;
+			// const headers={'ZANALYTICS-ORGID':OrganisationID};
+			const qs = {CONFIG :JSON.stringify({"withInvolvedMetaInfo": true})};
+			const viewID = this.getNodeParameter('view', '') as string;
+				const data = await zohoApiRequest.call(this,'GET', `/restapi/v2/views/${viewID}`,{},{},qs);
+				return data.data.views.columns.map((x: { columnName: string; })=>({name: x.columnName,value:x.columnName})) || [];
+			},
+		},
+	};
+
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 		const returnItems: INodeExecutionData[] = [];
-
 		let item: INodeExecutionData;
 		const operation = this.getNodeParameter('operation', 0, '') as string;
+		const orgID = this.getNodeParameter('organisation', 0, '') as string;
+		const workspaceID = this.getNodeParameter('workspace', 0, '') as string;
+		const viewID = this.getNodeParameter('view', 0, '') as string;
+		// let tableName = await zohoApiRequest.call(this,'GET', `/restapi/v2/workspaces/${workspaceID}/views/${viewID}`, {},{},{CONFIG :JSON.stringify({"withInvolvedMetaInfo": false})});
+		// tableName= tableName.data.views.viewName;
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
+
 				item = items[itemIndex];
-				if (operation === 'addTemplate') {
-					const endpoint = 'template';
-
-					const qs: IDataObject = {};
-					const body: IDataObject = {};
-
-					if (item.binary === undefined) {
-						throw new NodeOperationError(this.getNode(), 'No binary data exists on item!');
+				if (operation === 'addRow') {
+					const endpoint = `/restapi/v2/workspaces/${workspaceID}/views/${viewID}/rows`;
+					const headers={'ZANALYTICS-ORGID':orgID};
+					const columnData = this.getNodeParameter('data.columns', itemIndex, []) as availableColumn[];
+					const columns:IDataObject = {};
+					for (let i = 0; i < columnData.length; i++) {
+						const element = columnData[i];
+						columns[element['columnName']] = element.columnValue;
 					}
-
-					const binaryPropertyNameFull = this.getNodeParameter(
-						'binaryPropertyName',
-						itemIndex,
-					) as string;
-					const binaryPropertyNames = binaryPropertyNameFull.split(',').map((key) => key.trim());
-
-					for (const propertyData of binaryPropertyNames) {
-						const propertyName = 'template';
-						const binaryPropertyName = propertyData;
-
-						if (item.binary[binaryPropertyName] === undefined) {
-							throw new NodeOperationError(
-								this.getNode(),
-								`No binary data property "${binaryPropertyName}" does not exists on item!`,
-							);
-						}
-
-						const binaryProperty = item.binary[binaryPropertyName] as IBinaryData;
-						const binaryDataBuffer = await this.helpers.getBinaryDataBuffer(
-							itemIndex,
-							binaryPropertyName,
-						);
-
-						body[propertyName] = {
-							value: binaryDataBuffer,
-							options: {
-								filename: binaryProperty.fileName,
-								contentType: binaryProperty.mimeType,
-							},
-						};
-					}
-
-					const newItem: INodeExecutionData = {
-						json: {},
-						binary: {},
-					};
-					const data = await zohoFileUploadRequest.call(this, 'Post', endpoint, body, qs);
-					newItem.json = data.data;
-
-					returnItems.push(newItem);
+					const qs = {CONFIG :JSON.stringify({"columns": columns})};
+					const data = await zohoApiRequest.call(this,'POST', endpoint, headers,{},qs);
+					returnItems.push(...this.helpers.returnJsonArray(data.data));
 				}
 
-				if (operation === 'deleteTemplate') {
-					const templateId = this.getNodeParameter('id', itemIndex, '') as string;
-					const endpoint = `template/${templateId}`;
-					const newItem: INodeExecutionData = {
-						json: {},
-						binary: {},
-					};
-					newItem.json = await zohoApiRequest.call(this, 'Delete', endpoint);
-					returnItems.push(newItem);
-				}
+				if (operation === 'deleteData') {
+					const endpoint = `/restapi/v2/workspaces/${workspaceID}/views/${viewID}/rows`;
+					const headers={'ZANALYTICS-ORGID':orgID};
+					const criteria = this.getNodeParameter('criteria', itemIndex, "") as string;
+					const modifyAll = this.getNodeParameter('modifyAllRows', itemIndex, false ) as boolean;
+					let qs = {};
 
-				if (operation === 'downloadReport') {
-					const reportId = this.getNodeParameter('id', itemIndex, '') as string;
-					const endpoint = `render/${reportId}`;
-					const binaryPropertyName = this.getNodeParameter(
-						'binaryPropertyName',
-						itemIndex,
-					) as string;
-
-					const newItem: INodeExecutionData = {
-						json: {},
-						binary: {},
-					};
-					if (items[itemIndex].binary !== undefined) {
-						// Create a shallow copy of the binary data so that the old
-						// data references which do not get changed still stay behind
-						// but the incoming data does not get changed.
-						newItem.binary = items[itemIndex].binary;
+					if(!modifyAll){
+						qs = {CONFIG :JSON.stringify({"criteria": criteria})};
+					}else{
+						qs = {CONFIG :JSON.stringify({"deleteAllRows": true})};
 					}
 
-					newItem.json = items[itemIndex].json;
-					const response = await zohoFileDownloadRequest.call(this, 'Get', endpoint);
-
-					newItem.binary![binaryPropertyName] = await this.helpers.prepareBinaryData(
-						response.body,
-						'Report',
-					);
-					returnItems.push(newItem);
-					//get report using ID
-					//select file extension (pdf etc..)
-					//generate the file using api?
+					const data = await zohoApiRequest.call(this,'DELETE', endpoint, headers,{},qs);
+					returnItems.push(...this.helpers.returnJsonArray(data.data));
 				}
 
-				if (operation === 'getTemplate') {
-					const templateId = this.getNodeParameter('id', itemIndex, '') as string;
-
-					const endpoint = `template/${templateId}`;
-					const binaryPropertyName = this.getNodeParameter(
-						'binaryPropertyName',
-						itemIndex,
-					) as string;
-
-					const newItem: INodeExecutionData = {
-						json: {},
-						binary: {},
-					};
-					if (items[itemIndex].binary !== undefined) {
-						newItem.binary = items[itemIndex].binary;
+				if (operation === 'updateData') {
+					const endpoint = `/restapi/v2/workspaces/${workspaceID}/views/${viewID}/rows`;
+					const headers={'ZANALYTICS-ORGID':orgID};
+					const criteria = this.getNodeParameter('criteria', itemIndex, "") as string;
+					const modifyAll = this.getNodeParameter('modifyAllRows', itemIndex, false ) as boolean;
+					const columnData = this.getNodeParameter('data.columns', itemIndex, []) as availableColumn[];
+					const columns:IDataObject = {};
+					for (let i = 0; i < columnData.length; i++) {
+						const element = columnData[i];
+						columns[element['columnName']] = element.columnValue;
+					}
+					let qs = {};
+					if(!modifyAll){
+						qs = {CONFIG :JSON.stringify({"columns": columns,"criteria": criteria})};
+					}else{
+						qs = {CONFIG :JSON.stringify({"columns": columns,"updateAllRows": true})};
 					}
 
-					newItem.json = items[itemIndex].json;
-					const response = await zohoFileDownloadRequest.call(this, 'Get', endpoint);
-
-					newItem.binary![binaryPropertyName] = await this.helpers.prepareBinaryData(
-						response.body,
-						'Template',
-					);
-					returnItems.push(newItem);
+					const data = await zohoApiRequest.call(this,'PUT', endpoint, headers,{},qs);
+					returnItems.push(...this.helpers.returnJsonArray(data.data));
 				}
 
-				if (operation === 'renderReport') {
-					const templateId = this.getNodeParameter('id', itemIndex, '') as string;
-					const endpoint = `render/${templateId}`;
-					const bodyType = this.getNodeParameter('bodyType', itemIndex, '') as string;
-					const body: IDataObject = {};
-					if (bodyType === 'json') {
-						const tempBody = this.getNodeParameter('body', itemIndex, '') as string;
-						try {
-							body.data = JSON.parse(tempBody) as IDataObject;
-						} catch (error) {
-							throw new NodeOperationError(this.getNode(), error, {
-								itemIndex,
-							});
-						}
-					}
-					if (bodyType === 'perField') {
-						const fieldArray = this.getNodeParameter('data.field', itemIndex, '') as IDataObject[];
 
-						const data: IDataObject = {};
-						for (let fieldIndex = 0; fieldIndex < fieldArray.length; fieldIndex++) {
-							const field = fieldArray[fieldIndex];
-							if (field.fieldType === 'string') {
-								data[field.fieldName as string] = field.fieldValue as string;
-							}
-							if (field.fieldType === 'array') {
-								data[field.fieldName as string] = JSON.parse(field.fieldValue as string);
-							}
-						}
-						body.data = data;
-					}
-					const newItem: INodeExecutionData = {
-						json: {},
-						binary: {},
-					};
-					body.convertTo = 'pdf';
-					newItem.json = await zohoApiRequest.call(this, 'Post', endpoint, body);
-					returnItems.push(newItem);
+				if (operation === 'exportData') {
+					const endpoint = `/restapi/v2/workspaces/${workspaceID}/views/${viewID}/data`;
+					const headers={'ZANALYTICS-ORGID':orgID};
+					const criteria = this.getNodeParameter('criteria', itemIndex, "") as string;
+					const qs = {CONFIG :JSON.stringify({"responseFormat": "json","criteria": criteria})};
+					const data = await zohoApiRequest.call(this,'POST', endpoint, headers,{},qs);
+					returnItems.push(...this.helpers.returnJsonArray(data.data));
 				}
+
+
+				if (operation === 'importData') {
+					const endpoint = `/restapi/v2/workspaces/${workspaceID}/views/${viewID}/data`;
+					const headers={'ZANALYTICS-ORGID':orgID};
+					const importType = this.getNodeParameter('importType', itemIndex, "") as string;
+					const jsonData = this.getNodeParameter('jsonData', itemIndex, "") as string;
+					const body = {"DATA": jsonData};
+					const qs = {CONFIG :JSON.stringify({"importType": importType,"fileType": "json","autoIdentify": false, "retainColumnNames":true})};
+					// console.log(qs);
+					// console.log(body);
+					const data = await zohoApiRequest.call(this,'POST',endpoint, headers,body,qs,{},"",true);
+					returnItems.push(...this.helpers.returnJsonArray(data.data));
+				}
+				if (operation === 'importNewTable') {
+					const endpoint = `/restapi/v2/workspaces/${workspaceID}/data`;
+					const headers={'ZANALYTICS-ORGID':orgID};
+					const jsonData = this.getNodeParameter('jsonData', itemIndex, "") as string;
+					const tableName = this.getNodeParameter('tableName', itemIndex, "") as string;
+					const body = {"DATA": jsonData};
+					const qs = {CONFIG :JSON.stringify({"tableName": tableName,"fileType": "json","autoIdentify": false, "retainColumnNames":true})};
+					// console.log(qs);
+					// console.log(body);
+					const data = await zohoApiRequest.call(this,'POST',endpoint, headers,body,qs,{},"",true);
+					returnItems.push(...this.helpers.returnJsonArray(data.data));
+				}
+
+
+
 			} catch (error) {
 				if (this.continueOnFail()) {
 					items.push({ json: this.getInputData(itemIndex)[0].json, error, pairedItem: itemIndex });
@@ -372,3 +415,5 @@ export class ZohoAnalytics implements INodeType {
 		return this.prepareOutputData(returnItems);
 	}
 }
+
+
