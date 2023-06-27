@@ -256,6 +256,20 @@ export class ZohoAnalytics implements INodeType {
 				description:
 					`JSON data to import into Table`,
 			},
+			{
+				displayName: 'Matching Columns',
+				name: 'matchingColumns',
+				type: 'string',
+				displayOptions: {
+					show: {
+						operation: ['importData'],
+						importType: ['updateadd'],
+
+					},
+				},
+				default: '',
+				description: 'List of comma-separated column names. The values in the columns to be matched will be used for comparison to check whether data row(s) being imported matches with an existing row(s) in the table. The existing rows in the table that match will be updated with values from data imported. The remaining rows are appended to the table as new rows.',
+			},
 		],
 	};
 
@@ -374,8 +388,10 @@ methods = {
 					const headers={'ZANALYTICS-ORGID':orgID};
 					const importType = this.getNodeParameter('importType', itemIndex, "") as string;
 					const jsonData = this.getNodeParameter('jsonData', itemIndex, "") as string;
+					const matchingColumns = this.getNodeParameter('matchingColumns', itemIndex, "") as string || "";
+					const arrayOfMatchingColumns = matchingColumns.split(',') || [];
 					const body = {"DATA": jsonData};
-					const qs = {CONFIG :JSON.stringify({"importType": importType,"fileType": "json","autoIdentify": false, "retainColumnNames":true})};
+					const qs = {CONFIG :JSON.stringify({"importType": importType,"fileType": "json","autoIdentify": false, "retainColumnNames":true, "matchingColumns":arrayOfMatchingColumns})};
 					// console.log(qs);
 					// console.log(body);
 					const data = await zohoApiRequest.call(this,'POST',endpoint, headers,body,qs,{},"",true);
